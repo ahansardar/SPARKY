@@ -1,0 +1,17 @@
+import numpy as np
+import sounddevice as sd
+
+def wake_sound():
+    duration = 0.15
+    sample_rate = 44100
+    t = np.linspace(0, duration, int(sample_rate * duration), False)
+
+    notes = [600, 750, 900]
+    audio = np.array([])
+
+    for freq in notes:
+        tone = 0.4 * np.sin(2 * np.pi * freq * t)
+        audio = np.concatenate((audio, tone))
+
+    sd.play(audio, sample_rate)
+    sd.wait()

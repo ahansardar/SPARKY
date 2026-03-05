@@ -1,0 +1,50 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*.egg-info/
+dist/
+dist-installer/
+build/
+installer/
+
+# =========================
+# Virtual Environments
+# =========================
+venv/
+.env/
+.env.*
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =========================
+# Logs / Temp
+# =========================
+*.log
+*.tmp
+
+# =========================
+# Ollama / Local AI
+# =========================
+# (Models are stored outside the project by Ollama)
+# Nothing to add here intentionally
+
+# =========================
+# Frontend
+# =========================
+node_modules/
+
+# =========================
+# Misc
+# =========================
+*.bak

@@ -1,0 +1,1 @@
+# SPARKY actions package

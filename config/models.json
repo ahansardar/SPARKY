@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "default_model": "llama3:8b",
+  "models": [
+    {
+      "id": "llama3:8b",
+      "label": "LLaMA 3 8B",
+      "category": "High-End Local AI",
+      "description": "Only enabled model",
+      "ram_requirement_gb": 8
+    }
+  ]
+}
