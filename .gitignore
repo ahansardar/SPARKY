@@ -11,6 +11,7 @@ dist/
 dist-installer/
 build/
 installer/
+SPARKY.spec
 
 # =========================
 # Virtual Environments
