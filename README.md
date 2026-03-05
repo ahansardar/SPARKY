@@ -1,7 +1,7 @@
 # SPARKY
 
 <p align="center">
-  <img src="assets/logo2.png" alt="SPARKY Logo" width="220" />
+  <img src="https://github.com/user-attachments/assets/3060d7b1-1781-410d-bc79-265e280a42de" alt="SPARKY Logo" width="220" />
 </p>
 
 <p align="center">
