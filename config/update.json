@@ -1,0 +1,10 @@
+{
+  "github_repo": "ahansardar/SPARKY",
+  "release_api": "https://api.github.com/repos/{repo}/releases/latest",
+  "release_page": "https://github.com/{repo}/releases/latest",
+  "patch_asset_names": [
+    "SPARKY-patch-{version}.zip",
+    "SPARKY-patch.zip"
+  ],
+  "remind_later_hours": 24
+}

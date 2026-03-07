@@ -27,6 +27,7 @@ ACTION_MAP = {
     "file_controller": ("file_controller.py", "file_controller"),
     "flight_finder": ("flight_finder.py", "flight_finder"),
     "open_app": ("open_app.py", "open_app"),
+    "pdf_summarizer": ("pdf_summarizer.py", "pdf_summarizer"),
     "reminder": ("reminder.py", "reminder"),
     "screen_process": ("screen_processor.py", "screen_process"),
     "screen_processor": ("screen_processor.py", "screen_process"),
@@ -35,6 +36,8 @@ ACTION_MAP = {
     "web_search": ("web_search.py", "web_search"),
     "youtube_video": ("youtube_video.py", "youtube_video"),
 }
+
+DISABLED_ACTIONS = {"web_search", "browser_control"}
 
 SPECIAL_ACTIONS = {
     "agent_execute",
@@ -56,7 +59,7 @@ def _actions_dir() -> Path:
 
 
 def list_actions() -> list[str]:
-    return sorted(set(ACTION_MAP.keys()) | SPECIAL_ACTIONS)
+    return sorted((set(ACTION_MAP.keys()) - DISABLED_ACTIONS) | SPECIAL_ACTIONS)
 
 
 def _ensure_project_root_on_path() -> None:
@@ -80,7 +83,11 @@ def _load_callable(action_name: str):
     try:
         # Prefer bundled/importable module first (works in frozen builds without .py files on disk).
         module = importlib.import_module(module_name)
-    except Exception:
+    except ModuleNotFoundError as exc:
+        # Fall back to loading from a file only when the action module itself is missing.
+        missing_name = getattr(exc, "name", "") or ""
+        if missing_name != module_name:
+            raise
         if not module_path.exists():
             raise FileNotFoundError(f"Action module not found: {module_path}")
         spec = importlib.util.spec_from_file_location(f"sparky_ext_{action_name}", str(module_path))
@@ -175,6 +182,8 @@ def _run_special_action(action_name: str, parameters: dict[str, Any]) -> Any:
 
 def run_action(action_name: str, parameters: dict[str, Any] | None = None) -> str:
     params = parameters or {}
+    if action_name in DISABLED_ACTIONS:
+        return "This action is disabled in this build."
 
     if action_name in SPECIAL_ACTIONS:
         result = _run_special_action(action_name, params)

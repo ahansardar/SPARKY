@@ -11,7 +11,14 @@ dist/
 dist-installer/
 build/
 installer/
+!installer/
+installer/*
+!installer/*.ps1
+!installer/*.iss
 SPARKY.spec
+ai_agent.spec
+downloads/
+
 
 # =========================
 # Virtual Environments
@@ -33,12 +40,9 @@ Thumbs.db
 # =========================
 *.log
 *.tmp
+update.txt
+release_v1.1.0.md
 
-# =========================
-# Ollama / Local AI
-# =========================
-# (Models are stored outside the project by Ollama)
-# Nothing to add here intentionally
 
 # =========================
 # Frontend

@@ -25,6 +25,7 @@ Created by **Ahan Sardar**.
 ## Table of Contents
 
 - [Features](#features)
+- [Upgrade v1.1.0](#upgrade-v110)
 - [Tech Stack](#tech-stack)
 - [Requirements](#requirements)
 - [System Requirements](#system-requirements)
@@ -47,10 +48,79 @@ Created by **Ahan Sardar**.
 - Wake word support with **OpenWakeWord** (`hey_sparky`)
 - Voice input via microphone + SpeechRecognition
 - Voice output via **Piper TTS**
+- PDF summarization from local files
 - Vision-enabled actions (uses `llava:7b` when needed)[Still under development]
 - Animated Tkinter desktop UI
 - User memory read/update support
+- GitHub release update checker with in-app patch update prompt
 
+## Upgrade v1.1.0
+
+Post-last-push upgrades included in this version:
+
+- Voice and wake word:
+  - Always-on wake-word listener reliability improvements (auto-restart watchdog)
+  - Wake listening and manual mic flow coordination improvements
+  - Wake/listening cue sounds integrated (`wake.wav` / `sleep.wav`)
+
+- Audio controls:
+  - Dedicated **Control Pane** opened from header **Settings** button (`assets/settings.svg`)
+  - Mic mute/unmute feature with proper hard block on microphone access when muted
+  - AI voice volume control with slider and icons (`volume_mute.svg`, `volume_low.svg`, `volume_high.svg`)
+  - Live TTS gain control in runtime
+  - In-app playback pane for active media with thumbnail, song title, artist, and progress
+  - Playback controls: **Previous = -5s seek**, **Play/Pause toggle**, **Next = +5s seek**
+  - Player button visuals updated to pane-matching transparent style
+
+- UI/UX upgrades:
+  - Header status now shows clear runtime state (Online / Listening / Processing / Responding)
+  - Processing indicator with rotating loading icon in status area
+  - Live info tiles for auto-timezone **Time**, **Date**, and **Weather (°C + icon)**
+  - Weather condition legend added in UI
+  - Cleaner input area and control grouping for easier usage
+  - Poppins font support from bundled local `fonts/` files with runtime fallback handling
+
+- PDF summarization flow:
+  - PDF upload flow (no manual path typing required)
+  - Pending upload card with discard (`X`) above input
+  - Uploaded PDF card in chat area
+  - Markdown-style response rendering improvements (bold and bullet formatting)
+
+- Runtime and behavior:
+  - Better first-run setup feedback for Ollama/model checks with progress states
+  - In-app GitHub release check on startup with themed **Update Now / Remind Me Later** popup
+  - Patch-update flow for installed builds using GitHub release patch ZIP assets
+  - Remind-later update state persisted locally for installed builds
+  - Conversational intent-routing fixes to avoid accidental action execution for normal questions
+  - Date/time query handling improved (including relative date queries like yesterday/today/tomorrow)
+  - Web/browsing action paths disabled in this build flow
+
+- Installer/runtime setup:
+  - Post-install progress reporting for Python/runtime/model setup
+  - Bundled Poppins fonts installed system-wide during setup
+  - Installer now expects Ollama to already be installed and focuses on model pull + verification
+  - Model setup flow now verifies Ollama, pulls `llama3:8b`, verifies the model, and ensures local serving
+  - Visible model-pull terminal flow added so long Ollama downloads do not appear frozen during setup
+
+- System monitoring:
+  - Header **Monitor** button with dedicated System Resource Monitor pane
+  - Live metrics for CPU temperature, GPU usage, CPU usage, RAM usage, storage usage
+  - Network speed from active speed tests (download/upload) shown in MB/s
+  - Manual **Run Speed Test** button in monitor pane
+
+- AI capability:
+  - Direct natural command support for system stats and speed tests
+  - `run speed test` executes immediately with results
+  - Resource responses include optimization suggestions when values are poor
+
+- Media and action stability:
+  - Action module loading hardened to avoid duplicate native-module loads in the same process
+  - YouTube/music playback path now defers heavy automation imports until actually needed
+  - Music commands prefer the direct playback path first for more reliable song requests
+
+- Stability fixes:
+  - Wake listener audio input fallback for unsupported channel configs
+  - Better microphone compatibility for varied device channel/sample-rate settings
 ## Tech Stack
 
 - Python 3.11+
@@ -65,7 +135,7 @@ Created by **Ahan Sardar**.
 
 - Windows (recommended; automation coverage is strongest on Windows)
 - Python 3.11 or newer
-- Ollama installed and running
+- Ollama installed
 - Microphone and speakers
 - FFmpeg available (repo includes `ffmpeg-8.0.1-essentials_build/`)
 
@@ -129,17 +199,19 @@ python src/ai_agent.py
 
 Note: Slash action format (`/action ...`) is disabled in the current app flow. Use natural language commands.
 
+Installed build note:
+- SPARKY can check GitHub releases on startup and offer a patch update for existing installs when a matching patch asset is published.
+
 ## Supported Commands
 
 Examples you can type directly:
 
-- `open youtube.com`
 - `open calculator`
 - `play <song or video name>`
 - `pause` / `resume` / `stop song`
-- `search <topic>`
 - `weather now`
 - `weather in <city>`
+- `summarize pdf <full_file_path>`
 - `volume up` / `volume down` / `mute` / `set volume to 45`
 - `brightness up` / `brightness down`
 - `remind me to <task> at HH:MM on YYYY-MM-DD`
@@ -175,6 +247,9 @@ Examples you can type directly:
 
 - `SPARKY_WAKE_RMS_THRESHOLD`  
   Minimum input energy for wake pipeline (default in code: `80`).
+
+- `LOCALAPPDATA\SPARKY\update_state.json`
+  Stores the in-app updater remind-later state for release prompts.
 
 ## Project Structure
 
@@ -247,3 +322,4 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE).
 
 This project also depends on third-party tools/models (including FFmpeg and Ollama models).  
 Review their respective licenses before redistribution or commercial use.
+

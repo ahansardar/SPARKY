@@ -155,12 +155,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         return open_app(parameters=parameters, player=None) or "Done."
 
     elif tool == "web_search":
-        from actions.web_search import web_search
-        return web_search(parameters=parameters, player=None) or "Done."
+        return "This action is disabled in this build."
 
     elif tool == "browser_control":
-        from actions.browser_control import browser_control
-        return browser_control(parameters=parameters, player=None) or "Done."
+        return "This action is disabled in this build."
 
     elif tool == "file_controller":
         from actions.file_controller import file_controller

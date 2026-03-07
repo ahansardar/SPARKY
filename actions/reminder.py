@@ -21,7 +21,7 @@ def reminder(
         - time    (str) HH:MM
         - message (str)
 
-    Returns a result string — Live API voices it automatically.
+    Returns a result string â€” Live API voices it automatically.
     No edge_speak needed.
     """
 
@@ -38,8 +38,13 @@ def reminder(
         if target_dt <= datetime.now():
             return "That time is already in the past."
 
-        task_name    = f"MARKReminder_{target_dt.strftime('%Y%m%d_%H%M')}"
+        task_name    = f"Reminder_{target_dt.strftime('%Y%m%d_%H%M')}"
         safe_message = message.replace('"', '').replace("'", "").strip()[:200]
+        if not safe_message:
+            safe_message = "You have a scheduled reminder."
+        due_text = target_dt.strftime("%A, %d %B %Y at %I:%M %p")
+        notify_title = "SPARKY Reminder Due"
+        notify_body = f"Task: {safe_message}\\nDue: {due_text}"
 
         python_exe = sys.executable
         if python_exe.lower().endswith("python.exe"):
@@ -61,28 +66,59 @@ sys.path.insert(0, r"{project_root}")
 
 try:
     import winsound
-    for freq in [800, 1000, 1200]:
-        winsound.Beep(freq, 200)
-        time.sleep(0.1)
+    # Attention pattern: short ramp + repeat.
+    for _ in range(2):
+        for freq, dur in [(880, 180), (1040, 180), (1320, 220)]:
+            winsound.Beep(freq, dur)
+            time.sleep(0.06)
+        time.sleep(0.15)
+except Exception:
+    pass
+
+try:
+    import subprocess
+    speak_text = "Sparky reminder. {safe_message}. This reminder is due now."
+    subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "$s=New-Object -ComObject SAPI.SpVoice; $s.Rate=0; $s.Volume=100; $s.Speak('{safe_message}. Reminder due now.');",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
 except Exception:
     pass
 
 try:
     from win10toast import ToastNotifier
     ToastNotifier().show_toast(
-        "MARK Reminder",
-        "{safe_message}",
-        duration=15,
+        "{notify_title}",
+        "{notify_body}",
+        duration=22,
         threaded=False
     )
 except Exception:
     try:
         import subprocess
-        subprocess.run(["msg", "*", "/TIME:30", "{safe_message}"], shell=True)
+        subprocess.run(["msg", "*", "/TIME:45", "{notify_title} - {safe_message}"], shell=True)
     except Exception:
         pass
 
-time.sleep(3)
+try:
+    import tkinter as _tk
+    from tkinter import messagebox as _mb
+    _r = _tk.Tk()
+    _r.withdraw()
+    _r.attributes("-topmost", True)
+    _mb.showwarning("{notify_title}", "{notify_body}", parent=_r)
+    _r.destroy()
+except Exception:
+    pass
+
+time.sleep(5)
 try:
     os.remove(__file__)
 except Exception:
@@ -94,7 +130,7 @@ except Exception:
         xml_content = f'''<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>MARK Reminder: {safe_message}</Description>
+    <Description>Reminder: {safe_message}</Description>
   </RegistrationInfo>
   <Triggers>
     <TimeTrigger>
@@ -141,7 +177,7 @@ except Exception:
 
         if result.returncode != 0:
             err = result.stderr.strip() or result.stdout.strip()
-            print(f"[Reminder] ❌ schtasks failed: {err}")
+            print(f"[Reminder] âŒ schtasks failed: {err}")
             try:
                 os.remove(notify_script)
             except Exception:
@@ -151,7 +187,10 @@ except Exception:
         if player:
             player.write_log(f"[reminder] set for {date_str} {time_str}")
 
-        return f"Reminder set for {target_dt.strftime('%B %d at %I:%M %p')}."
+        return (
+            f"Reminder set for {target_dt.strftime('%B %d at %I:%M %p')}. "
+            f"I will alert you for: {safe_message}"
+        )
 
     except ValueError:
         return "I couldn't understand that date or time format."

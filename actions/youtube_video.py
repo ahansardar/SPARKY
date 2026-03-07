@@ -13,12 +13,9 @@ import threading
 import subprocess
 import shutil
 import os
+import sys
 from pathlib import Path
 
-import pyautogui
-import numpy as np
-import cv2
-from PIL import ImageGrab
 from actions.ollama_text import OllamaTextModel
 
 try:
@@ -52,9 +49,36 @@ HEADERS = {
 
 _audio_lock = threading.Lock()
 _audio_process: subprocess.Popen | None = None
+_audio_source_process: subprocess.Popen | None = None
 _audio_paused = False
+_playback_meta = {
+    "title": "",
+    "artist": "",
+    "thumbnail": "",
+    "duration_sec": 0.0,
+    "started_at": 0.0,
+    "paused_total": 0.0,
+    "paused_at": 0.0,
+    "source": "none",
+    "audio_url": "",
+    "webpage_url": "",
+}
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCAL_FFMPEG_BIN = _PROJECT_ROOT / "ffmpeg-8.0.1-essentials_build" / "bin"
+
+
+def _import_pyautogui():
+    import pyautogui
+
+    return pyautogui
+
+
+def _import_screen_stack():
+    import numpy as np
+    import cv2
+    from PIL import ImageGrab
+
+    return np, cv2, ImageGrab
 
 
 def _resolve_tool(exe_name: str) -> str | None:
@@ -67,8 +91,113 @@ def _resolve_tool(exe_name: str) -> str | None:
     return None
 
 
+def _reset_playback_meta():
+    _playback_meta.update(
+        {
+            "title": "",
+            "artist": "",
+            "thumbnail": "",
+            "duration_sec": 0.0,
+            "started_at": 0.0,
+            "paused_total": 0.0,
+            "paused_at": 0.0,
+            "source": "none",
+            "audio_url": "",
+            "webpage_url": "",
+        }
+    )
+
+
+def _begin_playback_meta(meta: dict):
+    _playback_meta.update(
+        {
+            "title": str(meta.get("title") or "").strip(),
+            "artist": str(meta.get("artist") or "Unknown Artist").strip(),
+            "thumbnail": str(meta.get("thumbnail") or "").strip(),
+            "duration_sec": float(meta.get("duration_sec") or 0.0),
+            "started_at": time.monotonic(),
+            "paused_total": 0.0,
+            "paused_at": 0.0,
+            "source": str(meta.get("source") or "youtube_audio"),
+            "audio_url": str(meta.get("audio_url") or "").strip(),
+            "webpage_url": str(meta.get("webpage_url") or "").strip(),
+        }
+    )
+
+
+def _playback_position_sec() -> float:
+    started = float(_playback_meta.get("started_at") or 0.0)
+    if started <= 0:
+        return 0.0
+    paused_total = float(_playback_meta.get("paused_total") or 0.0)
+    paused_at = float(_playback_meta.get("paused_at") or 0.0)
+    now = paused_at if paused_at > 0 else time.monotonic()
+    return max(0.0, now - started - paused_total)
+
+
+def get_playback_state() -> dict:
+    if not _is_audio_playing():
+        return {"active": False}
+
+    duration_sec = float(_playback_meta.get("duration_sec") or 0.0)
+    position_sec = _playback_position_sec()
+    if duration_sec > 0:
+        position_sec = min(position_sec, duration_sec)
+        progress_pct = max(0.0, min(100.0, (position_sec / duration_sec) * 100.0))
+    else:
+        progress_pct = 0.0
+
+    return {
+        "active": True,
+        "title": str(_playback_meta.get("title") or "Now Playing"),
+        "artist": str(_playback_meta.get("artist") or "Unknown Artist"),
+        "thumbnail": str(_playback_meta.get("thumbnail") or ""),
+        "duration_sec": duration_sec,
+        "position_sec": position_sec,
+        "progress_pct": progress_pct,
+        "paused": bool(_audio_paused),
+    }
+
+
+def _send_media_key(key_name: str) -> bool:
+    try:
+        pyautogui = _import_pyautogui()
+        pyautogui.press(key_name)
+        return True
+    except Exception:
+        return False
+
+
+def _restart_direct_at(position_sec: float) -> bool:
+    audio_url = str(_playback_meta.get("audio_url") or "").strip()
+    if not audio_url:
+        return False
+    pos = max(0.0, float(position_sec))
+    snapshot = dict(_playback_meta)
+    if not _play_audio_direct(audio_url, start_sec=pos):
+        return False
+    _begin_playback_meta(snapshot)
+    _playback_meta["started_at"] = time.monotonic() - pos
+    _playback_meta["paused_total"] = 0.0
+    _playback_meta["paused_at"] = 0.0
+    return True
+
+
+def _seek_relative(delta_sec: float) -> bool:
+    if not _is_audio_playing():
+        return False
+    duration = float(_playback_meta.get("duration_sec") or 0.0)
+    current = _playback_position_sec()
+    target = current + float(delta_sec)
+    if duration > 0:
+        target = min(max(0.0, target), max(0.0, duration - 1.0))
+    else:
+        target = max(0.0, target)
+    return _restart_direct_at(target)
+
+
 def _stop_audio_playback():
-    global _audio_process
+    global _audio_process, _audio_source_process
     with _audio_lock:
         if _audio_process and _audio_process.poll() is None:
             try:
@@ -79,9 +208,20 @@ def _stop_audio_playback():
                     _audio_process.kill()
                 except Exception:
                     pass
+        if _audio_source_process and _audio_source_process.poll() is None:
+            try:
+                _audio_source_process.terminate()
+                _audio_source_process.wait(timeout=2)
+            except Exception:
+                try:
+                    _audio_source_process.kill()
+                except Exception:
+                    pass
         _audio_process = None
+        _audio_source_process = None
         global _audio_paused
         _audio_paused = False
+        _reset_playback_meta()
 
 
 def _is_audio_playing() -> bool:
@@ -100,16 +240,21 @@ def _set_audio_paused(paused: bool) -> bool:
             if paused:
                 proc.suspend()
                 _audio_paused = True
+                if _playback_meta["paused_at"] <= 0:
+                    _playback_meta["paused_at"] = time.monotonic()
             else:
                 proc.resume()
                 _audio_paused = False
+                if _playback_meta["paused_at"] > 0:
+                    _playback_meta["paused_total"] += max(0.0, time.monotonic() - _playback_meta["paused_at"])
+                    _playback_meta["paused_at"] = 0.0
             return True
         except Exception as e:
             print(f"[YouTube] ⚠️ Pause/resume failed: {e}")
             return False
 
 
-def _search_youtube_audio(query: str) -> tuple[str, str, str] | None:
+def _search_youtube_audio(query: str) -> dict | None:
     if not _YTDLP_OK:
         return None
     ffmpeg_bin = _resolve_tool("ffmpeg")
@@ -130,9 +275,18 @@ def _search_youtube_audio(query: str) -> tuple[str, str, str] | None:
         if not entries:
             return None
         first = entries[0]
-        title = first.get("title") or query
+        title = str(first.get("title") or query).strip()
         webpage_url = first.get("webpage_url") or first.get("url")
         audio_url = first.get("url")
+        artist = str(first.get("artist") or first.get("uploader") or first.get("channel") or "Unknown Artist").strip()
+        duration_sec = float(first.get("duration") or 0.0)
+        thumbnail = str(first.get("thumbnail") or "").strip()
+        thumbnails = first.get("thumbnails") or []
+        if not thumbnail and thumbnails:
+            try:
+                thumbnail = str(thumbnails[-1].get("url") or "").strip()
+            except Exception:
+                thumbnail = ""
         # Prefer the direct media URL from formats when available.
         formats = first.get("formats") or []
         for f in formats:
@@ -141,13 +295,21 @@ def _search_youtube_audio(query: str) -> tuple[str, str, str] | None:
                 break
         if not audio_url or not webpage_url:
             return None
-        return title, audio_url, webpage_url
+        return {
+            "title": title,
+            "artist": artist,
+            "audio_url": audio_url,
+            "webpage_url": webpage_url,
+            "duration_sec": duration_sec,
+            "thumbnail": thumbnail,
+            "source": "youtube_audio",
+        }
     except Exception as e:
         print(f"[YouTube] ⚠️ yt-dlp search failed: {e}")
         return None
 
 
-def _play_audio_direct(audio_url: str) -> bool:
+def _play_audio_direct(audio_url: str, start_sec: float = 0.0) -> bool:
     global _audio_process, _audio_paused
     ffplay = _resolve_tool("ffplay")
     if not ffplay:
@@ -161,7 +323,22 @@ def _play_audio_direct(audio_url: str) -> bool:
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
         _audio_process = subprocess.Popen(
-            [ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet", audio_url],
+            [
+                ffplay,
+                "-nodisp",
+                "-autoexit",
+                "-loglevel",
+                "quiet",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+                "-ss",
+                f"{max(0.0, float(start_sec)):.3f}",
+                audio_url,
+            ],
             **kwargs,
         )
         _audio_paused = False
@@ -170,7 +347,66 @@ def _play_audio_direct(audio_url: str) -> bool:
         print(f"[YouTube] ⚠️ ffplay failed: {e}")
         return False
 
+
+def _play_audio_via_ytdlp(webpage_url: str) -> bool:
+    """
+    More stable playback path:
+    yt-dlp handles YouTube stream extraction while ffplay consumes stdin.
+    """
+    global _audio_process, _audio_source_process, _audio_paused
+    ffplay = _resolve_tool("ffplay")
+    if not ffplay:
+        return False
+    _stop_audio_playback()
+    try:
+        src_kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL}
+        play_kwargs = {"stderr": subprocess.DEVNULL}
+        if os.name == "nt":
+            src_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+            play_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+
+        _audio_source_process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "yt_dlp",
+                "-f",
+                "bestaudio/best",
+                "--no-playlist",
+                "--quiet",
+                "--no-warnings",
+                "-o",
+                "-",
+                webpage_url,
+            ],
+            **src_kwargs,
+        )
+        if _audio_source_process.stdout is None:
+            _stop_audio_playback()
+            return False
+        _audio_process = subprocess.Popen(
+            [
+                ffplay,
+                "-nodisp",
+                "-autoexit",
+                "-loglevel",
+                "quiet",
+                "-i",
+                "pipe:0",
+            ],
+            stdin=_audio_source_process.stdout,
+            stdout=subprocess.DEVNULL,
+            **play_kwargs,
+        )
+        _audio_paused = False
+        return True
+    except Exception as e:
+        print(f"[YouTube] ⚠️ yt-dlp pipeline playback failed: {e}")
+        _stop_audio_playback()
+        return False
+
 def open_browser():
+    pyautogui = _import_pyautogui()
     pyautogui.press("win")
     time.sleep(0.4)
     pyautogui.write("browser", interval=0.05)
@@ -182,6 +418,7 @@ def open_browser():
 def find_video_thumbnails() -> list[tuple[int, int]]:
 
     try:
+        np, cv2, ImageGrab = _import_screen_stack()
         screenshot = ImageGrab.grab()
         img        = np.array(screenshot)
         screen_h, screen_w = img.shape[:2]
@@ -427,12 +664,19 @@ def _handle_play(parameters: dict, player) -> str:
     # Preferred path: play audio directly without opening browser.
     found = _search_youtube_audio(query)
     if found:
-        title, audio_url, webpage_url = found
+        title = found["title"]
+        audio_url = found["audio_url"]
+        webpage_url = found["webpage_url"]
         if _play_audio_direct(audio_url):
+            _begin_playback_meta(found)
+            return f"Now playing: {title}"
+        if _play_audio_via_ytdlp(webpage_url):
+            _begin_playback_meta(found)
             return f"Now playing: {title}"
         print("[YouTube] ⚠️ Direct audio playback unavailable, falling back to browser.")
 
     open_browser()
+    pyautogui = _import_pyautogui()
 
     search_query = query.replace(" ", "+")
     url = f"https://www.youtube.com/results?search_query={search_query}"
@@ -489,6 +733,32 @@ def _handle_stop(parameters: dict, player, speak=None) -> str:
         return "No active song is playing right now."
     _stop_audio_playback()
     return "Stopped playback."
+
+
+def _handle_toggle(parameters: dict, player, speak=None) -> str:
+    if _is_audio_playing():
+        if _audio_paused:
+            if _set_audio_paused(False):
+                return "Resumed."
+            return "I could not resume the current playback."
+        if _set_audio_paused(True):
+            return "Paused."
+        return "I could not pause the current playback."
+    if _send_media_key("playpause"):
+        return "Sent play/pause command."
+    return "No active song is playing right now."
+
+
+def _handle_next(parameters: dict, player, speak=None) -> str:
+    if _seek_relative(5.0):
+        return "Skipped forward by 5 seconds."
+    return "I could not skip forward."
+
+
+def _handle_previous(parameters: dict, player, speak=None) -> str:
+    if _seek_relative(-5.0):
+        return "Skipped backward by 5 seconds."
+    return "I could not skip backward."
 
 
 def _handle_summarize(parameters: dict, player, speak) -> str:
@@ -606,6 +876,9 @@ _ACTION_MAP = {
     "pause":     _handle_pause,
     "resume":    _handle_resume,
     "stop":      _handle_stop,
+    "toggle":    _handle_toggle,
+    "next":      _handle_next,
+    "previous":  _handle_previous,
     "summarize": _handle_summarize,
     "get_info":  _handle_get_info,
     "trending":  _handle_trending,
@@ -649,7 +922,7 @@ def youtube_video(
     if handler is None:
         return (
             f"Unknown YouTube action: '{action}'. "
-            "Available: play, pause, resume, stop, summarize, get_info, trending."
+            "Available: play, pause, resume, stop, toggle, next, previous, summarize, get_info, trending."
         )
 
     try:

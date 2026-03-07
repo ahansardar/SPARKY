@@ -17,6 +17,13 @@ class PiperTTS:
         self.piper_exe = project_root / "piper" / "piper.exe"
         self.voice_model = project_root / "models" / "en_US-lessac-medium.onnx"
         self._speak_lock = threading.Lock()
+        self._volume = 1.0
+
+    def set_volume(self, volume: float) -> None:
+        try:
+            self._volume = max(0.0, min(1.0, float(volume)))
+        except Exception:
+            self._volume = 1.0
 
     def speak(self, text: str) -> None:
         if not text.strip():
@@ -55,12 +62,6 @@ class PiperTTS:
                     pass
 
     def _play_wav(self, wav_path: Path) -> None:
-        if platform.system() == "Windows":
-            import winsound
-
-            winsound.PlaySound(str(wav_path), winsound.SND_FILENAME)
-            return
-
         wf = wave.open(str(wav_path), "rb")
         pa = pyaudio.PyAudio()
         stream = pa.open(
@@ -72,6 +73,8 @@ class PiperTTS:
         try:
             data = wf.readframes(1024)
             while data:
+                if self._volume < 0.999:
+                    data = audioop.mul(data, wf.getsampwidth(), self._volume)
                 stream.write(data)
                 data = wf.readframes(1024)
         finally:
@@ -96,6 +99,64 @@ class VoiceIO:
         self._oww_builtin_model = os.getenv("SPARKY_OWW_MODEL", "hey_sparky").strip().lower()
         self._wake_cue_path = self.project_root / "assets" / "wake.wav"
         self._sleep_cue_path = self.project_root / "assets" / "sleep.wav"
+
+    def set_tts_volume(self, volume: float) -> None:
+        self.tts.set_volume(volume)
+
+    def _open_input_stream(self, pa: pyaudio.PyAudio, frames_per_buffer: int = 1024):
+        """Open a microphone stream with practical fallbacks for channel/rate."""
+        preferred_rates = [16000, 44100, 48000]
+        max_channels = 1
+        default_rate = 16000
+        device_index = None
+        try:
+            info = pa.get_default_input_device_info()
+            device_index = info.get("index")
+            max_channels = int(info.get("maxInputChannels", 1) or 1)
+            default_rate = int(float(info.get("defaultSampleRate", 16000) or 16000))
+        except Exception:
+            pass
+
+        rates = []
+        for r in preferred_rates + [default_rate]:
+            if r and r not in rates:
+                rates.append(int(r))
+        channel_candidates = []
+        for c in [1, 2, max_channels]:
+            if c > 0 and c not in channel_candidates:
+                channel_candidates.append(c)
+
+        last_exc = None
+        for rate in rates:
+            for channels in channel_candidates:
+                if channels > max_channels:
+                    continue
+                try:
+                    stream = pa.open(
+                        format=pyaudio.paInt16,
+                        channels=channels,
+                        rate=rate,
+                        input=True,
+                        frames_per_buffer=frames_per_buffer,
+                        input_device_index=device_index,
+                    )
+                    return stream, rate, channels
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Could not open input audio stream.")
+
+    def _to_mono_16k(self, pcm: bytes, in_rate: int, channels: int) -> bytes:
+        if not pcm:
+            return b""
+        out = pcm
+        if channels > 1:
+            out = audioop.tomono(out, 2, 0.5, 0.5)
+        if in_rate != 16000:
+            out, _ = audioop.ratecv(out, 2, 1, in_rate, 16000, None)
+        return out
 
     def _ensure_wake_recognizer(self):
         if self._wake_speechrec_ok is False:
@@ -205,20 +266,19 @@ class VoiceIO:
 
     def transcribe_once(self, seconds: int = 6, level_callback=None) -> str:
         seconds = max(1, min(int(seconds), 6))
-        sample_rate = 16000
         frames_per_buffer = 1024
         pa = pyaudio.PyAudio()
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=sample_rate,
-            input=True,
-            frames_per_buffer=frames_per_buffer,
-        )
+        try:
+            stream, sample_rate, channels = self._open_input_stream(pa, frames_per_buffer=frames_per_buffer)
+        except Exception:
+            pa.terminate()
+            return ""
         frames = []
         try:
             for _ in range(int(sample_rate / frames_per_buffer * seconds)):
                 chunk = stream.read(frames_per_buffer, exception_on_overflow=False)
+                if channels > 1:
+                    chunk = audioop.tomono(chunk, 2, 0.5, 0.5)
                 frames.append(chunk)
                 if level_callback is not None:
                     try:
@@ -234,6 +294,9 @@ class VoiceIO:
         pcm = b"".join(frames)
         if not pcm:
             return ""
+        if sample_rate != 16000:
+            pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, 16000, None)
+            sample_rate = 16000
 
         try:
             import speech_recognition as sr
@@ -246,21 +309,20 @@ class VoiceIO:
             return ""
 
     def detect_wakeword_once(self, wakeword: str = "hey_sparky", seconds: int = 1) -> bool:
-        sample_rate = 16000
         frames_per_buffer = 1024
         pa = pyaudio.PyAudio()
-        open_kwargs = {
-            "format": pyaudio.paInt16,
-            "channels": 1,
-            "rate": sample_rate,
-            "input": True,
-            "frames_per_buffer": frames_per_buffer,
-        }
-        stream = pa.open(**open_kwargs)
+        try:
+            stream, sample_rate, channels = self._open_input_stream(pa, frames_per_buffer=frames_per_buffer)
+        except Exception:
+            pa.terminate()
+            return False
         frames = []
         try:
             for _ in range(int(sample_rate / frames_per_buffer * max(1, seconds))):
-                frames.append(stream.read(frames_per_buffer, exception_on_overflow=False))
+                chunk = stream.read(frames_per_buffer, exception_on_overflow=False)
+                if channels > 1:
+                    chunk = audioop.tomono(chunk, 2, 0.5, 0.5)
+                frames.append(chunk)
         finally:
             stream.stop_stream()
             stream.close()
@@ -269,6 +331,9 @@ class VoiceIO:
         pcm = b"".join(frames)
         if not pcm:
             return False
+        if sample_rate != 16000:
+            pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, 16000, None)
+            sample_rate = 16000
 
         # Ignore near-silent chunks to avoid unnecessary API calls.
         if audioop.rms(pcm, 2) < self._wake_rms_threshold:
