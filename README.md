@@ -55,6 +55,11 @@ Created by **Ahan Sardar**.
 - GitHub release update checker with in-app patch update prompt
 
 ## Upgrade v1.1.0
+<p align="center">
+<a href="https://github.com/ahansardar/SPARKY/releases/latest">
+  <img src="https://img.shields.io/badge/Download-SPARKY-blue?style=for-the-badge">
+</a>
+</p>
 
 Post-last-push upgrades included in this version:
 
