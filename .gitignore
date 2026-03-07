@@ -11,10 +11,6 @@ dist/
 dist-installer/
 build/
 installer/
-!installer/
-installer/*
-!installer/*.ps1
-!installer/*.iss
 SPARKY.spec
 ai_agent.spec
 downloads/
