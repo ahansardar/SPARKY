@@ -52,7 +52,6 @@ High-level layout:
 - `agent/`: planning, execution, task queue, and error handling
 - `memory/`: memory storage and management
 - `assets/`: UI icons, sounds, and images
-- `installer/`: PowerShell and Inno Setup packaging scripts
 - `ui.py`: desktop UI
 - `system_stats.py`: system monitoring support
 
