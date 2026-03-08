@@ -1,18 +1,10 @@
 ---
 name: Bug report
-about: Create a bug report to help me improve
-title: Bug Report
-labels: ''
+about: Report a reproducible problem in SPARKY
+title: "[Bug]"
+labels: bug
 assignees: ahansardar
 
----
-
----
-name: Bug report
-about: Report a reproducible problem in SPARKY
-title: "[Bug] "
-labels: bug
-assignees: ""
 ---
 
 ## Describe the bug
